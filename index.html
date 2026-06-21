@@ -30,7 +30,22 @@
   </style>
 </head>
 <body>
-  <div id="localPreviewNotice" class="hidden" style="position:fixed;left:16px;right:16px;bottom:16px;z-index:200;background:#fff4d6;border:2px solid #c78900;border-radius:12px;padding:14px 18px;box-shadow:0 8px 30px rgba(0,0,0,.2);display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;text-align:center"><strong id="backendConnectionMessage">Connecting securely to the registration backend…</strong><button type="button" class="btn primary" onclick="initBackendBridge()">Retry connection</button></div>
+  <div id="localPreviewNotice" class="hidden" style="position:fixed;left:16px;right:16px;bottom:16px;z-index:200;background:#fff4d6;border:2px solid #c78900;border-radius:12px;padding:14px 18px;box-shadow:0 8px 30px rgba(0,0,0,.2);display:flex;flex-direction:column;gap:10px;text-align:center">
+    <div style="display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap">
+      <strong id="backendConnectionMessage">Connecting securely to the registration backend…</strong>
+      <a id="backendTestLink" href="#" target="_blank" rel="noopener" class="btn secondary">Open backend URL</a>
+      <button type="button" class="btn primary" onclick="initBackendBridge()">Retry connection</button>
+    </div>
+    <details style="text-align:left">
+      <summary style="cursor:pointer;font-weight:600">Wrong deployment URL? Paste the current one here</summary>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <input id="backendUrlOverride" type="url" placeholder="https://script.google.com/macros/s/XXXXXXXX/exec" style="flex:1;min-width:240px;padding:6px 8px;border-radius:6px;border:1px solid #c78900">
+        <button type="button" class="btn secondary" onclick="useBackendUrlOverride()">Use this URL</button>
+        <button type="button" class="btn secondary" onclick="clearBackendUrlOverride()">Reset to default</button>
+      </div>
+      <div id="backendUrlOverrideMsg" style="font-size:13px;margin-top:4px"></div>
+    </details>
+  </div>
   <section id="loginPage" class="login-page"><div class="login-art"><div class="eyebrow"><i class="ball"></i>IMAMANUEL MARTHOMA YUVAJANASAKHYAM, PANDANAD</div><h2>SMRITHI - 7'S FOOTBALL</h2><p>Users enter registrations with email OTP access. Administrators manage records with protected credentials.</p></div><div class="login-panel"><form id="loginForm" class="login-box"><div class="login-role-banners"><button id="userLoginBanner" class="role-banner active" type="button" onclick="selectLoginRole('user')"><span class="role-icon">⚽</span><strong>User Login</strong><small>Email OTP · Registration entry</small></button><button id="adminLoginBanner" class="role-banner" type="button" onclick="selectLoginRole('admin')"><span class="role-icon">🛡️</span><strong>Admin Login</strong><small>User ID & password · Full management</small></button></div><h2 id="loginTitle">User login</h2><p id="loginSubtitle">Sign in with email OTP to enter a team registration.</p><div id="userEmailField" class="field"><label for="loginEmail">Email address *</label><div class="otp-row"><input id="loginEmail" type="email" required autocomplete="email" placeholder="name@example.com"><button id="sendOtpBtn" class="btn secondary" type="button" onclick="requestLoginOtp()">Send OTP</button></div></div><div id="otpArea" class="field hidden"><label for="loginOtp">Enter OTP *</label><input id="loginOtp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="000000"></div><div id="adminCredentials" class="hidden"><div class="field"><label for="adminUserId">Administrator User ID *</label><input id="adminUserId" autocomplete="username" placeholder="Enter user ID"></div><div class="field"><label for="adminPassword">Administrator Password *</label><input id="adminPassword" type="password" autocomplete="current-password" placeholder="Enter password"></div></div><div id="loginMessage" class="login-message"></div><button id="verifyOtpBtn" class="btn primary hidden" type="submit">Verify & login →</button><p id="loginHint" class="hint" style="margin-top:16px">OTP expires in 10 minutes. Never share your OTP with anyone.</p></form></div></section>
   <div id="appShell" class="hidden">
   <nav class="topnav"><div class="brand">SMRITHI - 7'S FOOTBALL <span id="adminBadge" class="role-badge hidden">ADMIN</span></div><button class="nav-btn active" data-page="homePage" onclick="showPortalPage('homePage')">Home</button><button class="nav-btn" data-page="registrationPage" onclick="showPortalPage('registrationPage')">Team Details</button><button id="adminNav" class="nav-btn hidden" data-page="adminPage" onclick="showPortalPage('adminPage')">Admin</button><button class="nav-btn nav-logout" onclick="logoutPortal()">Logout</button></nav>
@@ -76,12 +91,45 @@
     <footer>Official witness letter generated through the 7's Football Match registration portal.</footer>
   </article>
   <script>
-    let currentStep=1, playerIndex=0, drawing=false, signed=false, ctx, canvas, currentAuth=null, adminRecords=[], currentAdminWitness=null, desiredLoginRole='user', paymentSettings={upiId:'QR917845969944-5421@unionbankofindia',qrDataUrl:'payment-qr.jpeg'}, pendingQrData='', bridgeReady=false, bridgeTarget=null, bridgeCounter=0;
-    const BACKEND_URL='https://script.google.com/macros/s/AKfycbwW4dUtXBDj7-HKpPdC_uzZ-33gVEH3XrSgbuHjR-hsJX8nCtTIEIw3pbszItlMOns7pw/exec',bridgeRequests=new Map();
+    let currentStep=1, playerIndex=0, drawing=false, signed=false, ctx, canvas, currentAuth=null, adminRecords=[], currentAdminWitness=null, desiredLoginRole='user', paymentSettings={upiId:'QR917845969944-5421@unionbankofindia',qrDataUrl:'payment-qr.jpeg'}, pendingQrData='', bridgeReady=false, bridgeTarget=null, bridgeCounter=0, frameLoaded=false;
+    const DEFAULT_BACKEND_URL='https://script.google.com/macros/s/AKfycbwW4dUtXBDj7-HKpPdC_uzZ-33gVEH3XrSgbuHjR-hsJX8nCtTIEIw3pbszItlMOns7pw/exec',bridgeRequests=new Map();
+    function isValidBackendUrl(u){return /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(String(u||'').trim())}
+    function resolveBackendUrl(){const fromQuery=new URLSearchParams(location.search).get('backend');if(fromQuery&&isValidBackendUrl(fromQuery)){try{localStorage.setItem('smrithiBackendUrlOverride',fromQuery.trim())}catch(e){}return fromQuery.trim()}try{const stored=localStorage.getItem('smrithiBackendUrlOverride');if(stored&&isValidBackendUrl(stored))return stored}catch(e){}return DEFAULT_BACKEND_URL}
+    let BACKEND_URL=resolveBackendUrl();
+    function useBackendUrlOverride(){const input=document.getElementById('backendUrlOverride'),msg=document.getElementById('backendUrlOverrideMsg'),url=input.value.trim();if(!isValidBackendUrl(url)){msg.style.color='#a33';msg.textContent='That doesn\'t look like an Apps Script web app URL. It should look like https://script.google.com/macros/s/.../exec';return}try{localStorage.setItem('smrithiBackendUrlOverride',url)}catch(e){}BACKEND_URL=url;msg.style.color='#2a6b2a';msg.textContent='Using this URL now. Reconnecting…';initBackendBridge()}
+    function clearBackendUrlOverride(){try{localStorage.removeItem('smrithiBackendUrlOverride')}catch(e){}BACKEND_URL=DEFAULT_BACKEND_URL;document.getElementById('backendUrlOverride').value='';document.getElementById('backendUrlOverrideMsg').textContent='';initBackendBridge()}
     document.addEventListener('DOMContentLoaded',()=>{setupCanvas();for(let i=0;i<7;i++)addPlayer();document.getElementById('registrationForm').addEventListener('submit',submitForm);document.getElementById('loginForm').addEventListener('submit',loginPortal);if(!hasDirectBackend())initBackendBridge();const saved=sessionStorage.getItem('7sAuth');if(saved){try{openPortal(JSON.parse(saved))}catch(e){sessionStorage.removeItem('7sAuth')}}});
     function hasDirectBackend(){return !!(window.google&&google.script&&google.script.run)}
     function hasSpreadsheetBackend(){return hasDirectBackend()||bridgeReady}
-    function initBackendBridge(){if(hasDirectBackend()){bridgeReady=true;return}bridgeReady=false;bridgeTarget=null;const notice=document.getElementById('localPreviewNotice'),message=document.getElementById('backendConnectionMessage');notice.classList.remove('hidden');message.textContent='Connecting securely to the registration backend…';let frame=document.getElementById('backendBridge');if(frame)frame.remove();frame=document.createElement('iframe');frame.id='backendBridge';frame.title='Secure registration backend';frame.setAttribute('aria-hidden','true');frame.style.cssText='position:fixed;width:1px;height:1px;left:-10000px;top:-10000px;border:0;opacity:0;pointer-events:none';frame.src=BACKEND_URL+'?mode=bridge&v='+Date.now();frame.addEventListener('load',()=>{try{frame.contentWindow.postMessage({type:'smrithi-ping'},'*')}catch(e){}});document.body.appendChild(frame);const ping=setInterval(()=>{if(bridgeReady){clearInterval(ping);return}try{frame.contentWindow.postMessage({type:'smrithi-ping'},'*')}catch(e){}},1000);setTimeout(()=>{clearInterval(ping);if(!bridgeReady)message.textContent='Backend is not responding. The latest Apps Script version (including Bridge.html) must be deployed with access set to Anyone.'},15000)}
+    function initBackendBridge(){
+      if(hasDirectBackend()){bridgeReady=true;return}
+      bridgeReady=false;bridgeTarget=null;frameLoaded=false;
+      const notice=document.getElementById('localPreviewNotice'),message=document.getElementById('backendConnectionMessage'),testLink=document.getElementById('backendTestLink');
+      notice.classList.remove('hidden');
+      message.textContent='Connecting securely to the registration backend…';
+      const bridgeUrl=BACKEND_URL+'?mode=bridge';
+      testLink.href=bridgeUrl;
+      let frame=document.getElementById('backendBridge');
+      if(frame)frame.remove();
+      frame=document.createElement('iframe');
+      frame.id='backendBridge';
+      frame.title='Secure registration backend';
+      frame.setAttribute('aria-hidden','true');
+      frame.style.cssText='position:fixed;width:1px;height:1px;left:-10000px;top:-10000px;border:0;opacity:0;pointer-events:none';
+      frame.src=bridgeUrl+'&v='+Date.now();
+      frame.addEventListener('load',()=>{frameLoaded=true;try{frame.contentWindow.postMessage({type:'smrithi-ping'},'*')}catch(e){}});
+      document.body.appendChild(frame);
+      const ping=setInterval(()=>{if(bridgeReady){clearInterval(ping);return}try{frame.contentWindow.postMessage({type:'smrithi-ping'},'*')}catch(e){}},1000);
+      setTimeout(()=>{
+        clearInterval(ping);
+        if(bridgeReady)return;
+        if(!frameLoaded){
+          message.textContent='Could not reach this backend URL at all. Check it\u2019s the correct, currently-deployed Apps Script web app URL (Apps Script \u2192 Deploy \u2192 Manage deployments).';
+        }else{
+          message.textContent='Reached the backend URL, but it never confirmed the connection. Click "Open backend URL" above \u2014 a Google sign-in/permission page means the deployment\u2019s access must be changed to "Anyone"; a blank white page that still fails means Bridge.html isn\u2019t in the deployed version yet (add it, then redeploy with Version: New version).';
+        }
+      },15000);
+    }
     window.addEventListener('message',event=>{const data=event.data||{},host=event.origin==='null'?'':new URL(event.origin).hostname,trusted=host==='script.google.com'||/\.googleusercontent\.com$/i.test(host);if(!trusted)return;if(data.type==='smrithi-ready'){bridgeReady=true;bridgeTarget=event.source;document.getElementById('localPreviewNotice').classList.add('hidden');return}if(data.type==='smrithi-result'&&bridgeRequests.has(data.id)){const pending=bridgeRequests.get(data.id);bridgeRequests.delete(data.id);data.ok?pending.resolve(data.payload):pending.reject(new Error(data.payload&&data.payload.message||'Backend request failed.'))}});
     function selectLoginRole(role){desiredLoginRole=role;const admin=role==='admin',email=document.getElementById('loginEmail'),userId=document.getElementById('adminUserId'),password=document.getElementById('adminPassword'),submit=document.getElementById('verifyOtpBtn');document.getElementById('userLoginBanner').classList.toggle('active',!admin);document.getElementById('adminLoginBanner').classList.toggle('active',admin);document.getElementById('loginTitle').textContent=admin?'Administrator login':'User login';document.getElementById('loginSubtitle').textContent=admin?'Enter the administrator user ID and password.':'Sign in with email OTP to enter a team registration.';document.getElementById('userEmailField').classList.toggle('hidden',admin);document.getElementById('adminCredentials').classList.toggle('hidden',!admin);document.getElementById('otpArea').classList.add('hidden');email.required=!admin;userId.required=admin;password.required=admin;document.getElementById('loginOtp').required=false;document.getElementById('loginOtp').value='';document.getElementById('loginMessage').textContent='';submit.classList.toggle('hidden',!admin);submit.textContent=admin?'Login as administrator →':'Verify & login →';document.getElementById('loginHint').textContent=admin?'Administrator credentials are verified securely by the application backend.':'OTP expires in 10 minutes. Never share your OTP with anyone.';document.getElementById('sendOtpBtn').textContent='Send OTP'}
     async function requestLoginOtp(){const email=document.getElementById('loginEmail');if(!email.checkValidity()){email.reportValidity();return}const btn=document.getElementById('sendOtpBtn'),msg=document.getElementById('loginMessage');btn.disabled=true;btn.textContent='Sending…';msg.textContent='';try{await callServer('requestOtp',email.value.trim());document.getElementById('otpArea').classList.remove('hidden');document.getElementById('verifyOtpBtn').classList.remove('hidden');document.getElementById('loginOtp').required=true;msg.textContent='OTP sent. Please check your email.'+(desiredLoginRole==='admin'?' Administrator permission will be checked after verification.':'');document.getElementById('loginOtp').focus()}catch(err){msg.textContent=err.message||'Could not send OTP.'}finally{btn.disabled=false;btn.textContent='Resend OTP'}}
